@@ -34,15 +34,18 @@
 */
 
 #include "vl53l1_platform.h"
+#include "vl53l1_error_codes.h"
 #include <string.h>
 #include <time.h>
 #include <math.h>
-#include "driver/i2c"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/i2c.h"
 
 #define I2C_TIME_OUT_BASE   10
 #define I2C_TIME_OUT_BYTE   1
+uint8_t _I2CBuffer[256];
+uint8_t _ReadBuffer[128];
 
 int8_t VL53L1_WriteMulti( uint16_t dev, uint16_t index, uint8_t *pdata, uint32_t count) {
 	esp_err_t err = ESP_OK;
@@ -51,10 +54,11 @@ int8_t VL53L1_WriteMulti( uint16_t dev, uint16_t index, uint8_t *pdata, uint32_t
 
 	i2c_master_write_byte(cmd, dev << 1 | I2C_MASTER_WRITE, ACK_CHECK_EN);
 	i2c_master_write_byte(cmd, (index >> 8) & 0xff, ACK_CHECK_EN);
-	i2c_master_write_byte(cmd, index >> 8 0xff, ACK_CHECK_EN);
+	i2c_master_write_byte(cmd, index & 0xff, ACK_CHECK_EN);
 	i2c_master_write(cmd, pdata, count, ACK_CHECK_EN);
 	i2c_master_stop(cmd);
 	err = i2c_master_cmd_begin(I2C_NUM_0, cmd, I2C_TIME_OUT_BASE + count * I2C_TIME_OUT_BYTE);
+	i2c_cmd_link_delete(cmd);
 	return err;
 }
 
@@ -63,7 +67,7 @@ int8_t VL53L1_ReadMulti(uint16_t dev, uint16_t index, uint8_t *pdata, uint32_t c
 	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
 	i2c_master_write_byte(cmd, dev << 1 | I2C_MASTER_WRITE, ACK_CHECK_EN);
 	i2c_master_write_byte(cmd, (index >> 8) & 0xff, ACK_CHECK_EN);
-	i2c_master_write_byte(cmd, index >> 8 0xff, ACK_CHECK_EN);
+	i2c_master_write_byte(cmd, index & 0xff, ACK_CHECK_EN);
 	i2c_master_stop(cmd);
 	
 	i2c_master_write_byte(cmd, dev << 1 | I2C_MASTER_READ, ACK_CHECK_EN);
@@ -71,33 +75,96 @@ int8_t VL53L1_ReadMulti(uint16_t dev, uint16_t index, uint8_t *pdata, uint32_t c
 		i2c_master_read_byte(cmd, pdata + count, ACK_VAL);
 	}
 	i2c_master_read_byte(cmd, pdata + count, NACK_VAL);
+	i2c_master_stop(cmd);
+	err = i2c_master_cmd_begin(I2C_NUM_0, cmd, I2C_TIME_OUT_BASE + count * I2C_TIME_OUT_BYTE);
+	i2c_cmd_link_delete(cmd);
+	return err;
 }
 
 int8_t VL53L1_WrByte(uint16_t dev, uint16_t index, uint8_t data) {
-	VL53L1_WriteMulti(dev, index, *pdata,1);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	_I2CBuffer[0] = index>>8;
+    _I2CBuffer[1] = index&0xFF;
+    _I2CBuffer[2] = data;
+	esp_err_t err = i2c_master_write_to_device(I2C_NUM_0, dev, _I2CBuffer, 3, (I2C_TIME_OUT_BASE + 3 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	return Status;
+	//return VL53L1_WriteMulti(dev, index, &data,1);
 }
 
 int8_t VL53L1_WrWord(uint16_t dev, uint16_t index, uint16_t data) {
-	VL53L1_WriteMulti(dev, index, *pdata,2);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	_I2CBuffer[0] = index>>8;
+    _I2CBuffer[1] = index & 0xFF;
+    _I2CBuffer[2] = data >> 8;
+	_I2CBuffer[3] = data & 0xFF;
+	esp_err_t err = i2c_master_write_to_device(I2C_NUM_0, dev, _I2CBuffer, 4, (I2C_TIME_OUT_BASE + 4 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	return Status;
 }
 
 int8_t VL53L1_WrDWord(uint16_t dev, uint16_t index, uint32_t data) {
-	VL53L1_WriteMulti(dev, index, *pdata,4);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	_I2CBuffer[0] = index>>8;
+    _I2CBuffer[1] = index&0xFF;
+    _I2CBuffer[2] = (data >> 24) & 0xFF;
+	_I2CBuffer[3] = (data >> 16) & 0xFF;
+	_I2CBuffer[4] = (data >> 8) & 0xFF;
+	_I2CBuffer[5] = data & 0xFF;
+	esp_err_t err = i2c_master_write_to_device(I2C_NUM_0, dev, _I2CBuffer, 6, (I2C_TIME_OUT_BASE + 6 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	return Status;
 }
 
 int8_t VL53L1_RdByte(uint16_t dev, uint16_t index, uint8_t *data) {
-	VL53L1_ReadMulti(dev, index, *pdata, 1);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	esp_err_t err;
+	_I2CBuffer[0] = index>>8;
+	_I2CBuffer[1] = index & 0xFF;
+	err = i2c_master_write_read_device(I2C_NUM_0, dev, _I2CBuffer, 2, _ReadBuffer, 1, (I2C_TIME_OUT_BASE + 2 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	uint8_t tmp = _ReadBuffer[0];
+	*data = tmp;
+	return Status;
 }
 
 int8_t VL53L1_RdWord(uint16_t dev, uint16_t index, uint16_t *data) {
-	VL53L1_ReadMulti(dev, index, *pdata, 2);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	esp_err_t err;
+	_I2CBuffer[0] = index>>8;
+	_I2CBuffer[1] = index & 0xFF;
+	err = i2c_master_write_read_device(I2C_NUM_0, dev, _I2CBuffer, 2, _ReadBuffer, 2, (I2C_TIME_OUT_BASE + 2 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	uint8_t tmp = ((uint16_t)_ReadBuffer[0] << 8) + (uint16_t)_ReadBuffer[1];
+	*data = tmp;
+	return Status;
 }
 
 int8_t VL53L1_RdDWord(uint16_t dev, uint16_t index, uint32_t *data) {
-	VL53L1_ReadMulti(dev, index, *pdata, 4);
+	VL53L1_Error Status = VL53L1_ERROR_NONE;
+	esp_err_t err;
+	_I2CBuffer[0] = index>>8;
+	_I2CBuffer[1] = index & 0xFF;
+	err = i2c_master_write_read_device(I2C_NUM_0, dev, _I2CBuffer, 2, _ReadBuffer, 4, (I2C_TIME_OUT_BASE + 2 * I2C_TIME_OUT_BYTE)/portTICK_PERIOD_MS);
+	if(err != 0){
+		Status = VL53L1_ERROR_CONTROL_INTERFACE;
+	}
+	uint8_t tmp = ((uint16_t)_ReadBuffer[0] << 24) + ((uint16_t)_ReadBuffer[1] << 16) + ((uint16_t)_ReadBuffer[2] << 8) + (uint16_t)_ReadBuffer[3] ;
+	*data = tmp;
+	return Status;
 }
 
 int8_t VL53L1_WaitMs(uint16_t dev, int32_t wait_ms){
 	vTaskDelay(wait_ms/portTICK_PERIOD_MS);
-
+	return 0;
 }

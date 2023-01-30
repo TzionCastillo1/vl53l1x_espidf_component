@@ -1,1 +1,2 @@
 COMPONENT_ADD_INCLUDEDIRS := core platform
+COMPONENT_SRCDIRS := core platform

@@ -8,6 +8,12 @@
 
 #include "vl53l1_types.h"
 
+//required by driver/i2c
+#define ACK_CHECK_EN                    0x1
+#define ACK_CHECK_DIS                   0x0
+#define ACK_VAL                         0x0
+#define NACK_VAL                        0x1
+
 #ifdef __cplusplus
 extern "C"
 {
